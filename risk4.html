@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Interactive Orrery</title>
+    <style>
+        body { margin: 0; overflow: hidden; }
+        canvas { display: block; }
+        .control-panel {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            z-index: 1;
+            color: white;
+        }
+        .control-panel label {
+            display: block;
+            margin: 5px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="control-panel">
+        <label for="speedControl">Speed</label>
+        <input type="range" id="speedControl" min="0" max="100" value="7">
+        <label for="cameraX">Cam.X</label>
+        <input type="range" id="cameraX" min="-50" max="50" value="0">
+        <label for="cameraY">Cam.Y</label>
+        <input type="range" id="cameraY" min="0" max="100" value="25">
+        <label for="cameraZ">Cam.Z</label>
+        <input type="range" id="cameraZ" min="-50" max="50" value="-50">
+        <label for="zoom">Zoom</label>
+        <input type="range" id="zoom" min="10" max="100" value="30">
+
+        <!-- New view plane position controls -->
+        <label for="posX">Pos_X</label>
+        <input type="range" id="posX" min="-100" max="100" value="0">
+        <label for="posY">Pos_Y</label>
+        <input type="range" id="posY" min="-100" max="100" value="4">
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script>
+        // Scene setup
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.body.appendChild(renderer.domElement);
+
+        // Load textures for the Sun and the planets
+        const textureLoader = new THREE.TextureLoader();
+        const sunTexture = textureLoader.load('https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcTFyApZy1iIOdHOt_QIEEUhEvgfmNqMviD-Jg&s');
+        const mercuryTexture = textureLoader.load('https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQwR55jAL8DI5oC-AXWaxUAZ6hm73SScOFXU4YJBnY052f3kyzc-MN9nJ6RRPXKEAB4GfY&usqp=CAU');
+        const venusTexture = textureLoader.load('https://upload.wikimedia.org/wikipedia/commons/7/72/Venus_map_NASA_JPL_Magellan-Venera-Pioneer.jpg');
+        const earthTexture = textureLoader.load('https://upload.wikimedia.org/wikipedia/commons/thumb/2/23/Blue_Marble_2002.png/1280px-Blue_Marble_2002.png');
+        const marsTexture = textureLoader.load('https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcSfY3JUaaW1HWRopFl8L6wUW9xj8b0M8Qliyw&s');
+        const moonTexture = textureLoader.load('https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcT5MQZS7B0LbbZ4LJgK-djWwW3oczycATcJ3w&s');
+
+        // Placeholder textures for additional planets
+        const jupiterTexture = textureLoader.load('https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcSjT1qu2uPdDKdbp7iRNVsI8ewv-0HU0WP1hQ&s'); // Jupiter
+        const saturnTexture = textureLoader.load('https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcSYEnrF0UeJ820XsxahEe0QvY5wt9fyH3liXQ&s'); // Saturn
+        const uranusTexture = textureLoader.load('https://upload.wikimedia.org/wikipedia/commons/9/95/Solarsystemscope_texture_2k_uranus.jpg'); // Uranus
+        const neptuneTexture = textureLoader.load('https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcS5m6I1cNvdxJo1hMYBzgmMzcD1viyiItRiyg&s'); // Neptune
+
+        // Create the Sun with texture
+        const sunGeometry = new THREE.SphereGeometry(3, 32, 32);
+        const sunMaterial = new THREE.MeshBasicMaterial({ map: sunTexture });
+        const sun = new THREE.Mesh(sunGeometry, sunMaterial);
+        scene.add(sun);
+
+        // Create planets with their respective textures
+        const planets = [
+            { name: 'Mercury', radius: 5, size: 0.3, speed: 0.02, texture: mercuryTexture },
+            { name: 'Venus', radius: 7, size: 0.5, speed: 0.015, texture: venusTexture },
+            { name: 'Earth', radius: 9, size: 0.6, speed: 0.01, texture: earthTexture },
+            { name: 'Mars', radius: 11, size: 0.4, speed: 0.008, texture: marsTexture },
+            { name: 'Jupiter', radius: 15, size: 1.2, speed: 0.005, texture: jupiterTexture },
+            { name: 'Saturn', radius: 18, size: 1.0, speed: 0.004, texture: saturnTexture },
+            { name: 'Uranus', radius: 21, size: 0.8, speed: 0.003, texture: uranusTexture },
+            { name: 'Neptune', radius: 24, size: 0.8, speed: 0.002, texture: neptuneTexture }
+        ];
+
+        const planetMeshes = [];
+        const orbitGeometries = [];
+
+       // Tilt angles for each planet in degrees
+const planetTilts = [
+    7.0,  // Mercury
+    3.4,  // Venus
+    0.0,  // Earth (we assume no tilt for simplicity in orbit)
+    1.85, // Mars
+    1.3,  // Jupiter
+    2.5,  // Saturn
+    0.77, // Uranus
+    1.77  // Neptune
+];
+
+// Create the planets and their orbits
+planets.forEach((planet, index) => {
+    // Create orbit
+    const orbitGeometry = new THREE.RingGeometry(planet.radius + 0.01, planet.radius + 0.007, 10000);
+    const orbitMaterial = new THREE.LineBasicMaterial({ color: 0xffffff, opacity: 0.8, transparent: true });
+    const orbitMesh = new THREE.LineLoop(orbitGeometry, orbitMaterial);
+    
+    // Rotate to give the orbits a natural tilt
+    orbitMesh.rotation.x = Math.PI / 2; // Keep it horizontal
+    orbitMesh.rotation.z = THREE.Math.degToRad(planetTilts[index]); // Apply the tilt based on the planet's axial tilt
+    scene.add(orbitMesh);
+    orbitGeometries.push(orbitMesh);
+
+    // Create planet
+    const planetGeometry = new THREE.SphereGeometry(planet.size, 32, 32);
+    const planetMaterial = new THREE.MeshBasicMaterial({ map: planet.texture });
+    const planetMesh = new THREE.Mesh(planetGeometry, planetMaterial);
+    scene.add(planetMesh);
+    planetMeshes.push(planetMesh);
+});
+
+        // Create the Moon
+        const moonSize = 0.1; 
+        const moonSpeed = 0.03;
+        const moonGeometry = new THREE.SphereGeometry(moonSize, 32, 32);
+        const moonMaterial = new THREE.MeshBasicMaterial({ map: moonTexture }); 
+        const moonMesh = new THREE.Mesh(moonGeometry, moonMaterial);
+        
+        // Position the Moon relative to Earth
+        planetMeshes[2].add(moonMesh); // Attach Moon to Earth
+
+        // Create Saturn's ring with texture
+const saturnRingTexture = textureLoader.load('https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQLWPhSqRo5ZwwPJNEWQbPF6hXAn9bjEEktvg&s');
+const saturnRingGeometry = new THREE.RingGeometry(1.3, 2, 32);
+const saturnRingMaterial = new THREE.MeshBasicMaterial({
+    map: saturnRingTexture,
+    side: THREE.DoubleSide,
+    transparent: true,
+    opacity: 0.8
+});
+const saturnRingMesh = new THREE.Mesh(saturnRingGeometry, saturnRingMaterial);
+saturnRingMesh.rotation.x = Math.PI / 2; // Rotate to make it horizontal
+saturnRingMesh.position.y = 0; // Keep the ring aligned with the planet
+planetMeshes[5].add(saturnRingMesh); // Attach ring to Saturn
+
+        // Animation loop
+        const animate = () => {
+            requestAnimationFrame(animate);
+
+            const speedFactor = document.getElementById('speedControl').value / 100;
+
+            // Update planets' positions
+            planetMeshes.forEach((planetMesh, index) => {
+                const planet = planets[index];
+                const time = Date.now() * planet.speed * speedFactor;
+                const angle = time % (2 * Math.PI);
+
+                planetMesh.position.x = Math.cos(angle) * planet.radius;
+                planetMesh.position.z = Math.sin(angle) * planet.radius;
+            });
+
+            // Update Moon position with slight tilt
+const moonTime = Date.now() * moonSpeed * speedFactor;
+const moonAngle = moonTime % (2 * Math.PI);
+const moonTilt = 0.5; // Adjust this value for the desired tilt
+moonMesh.position.x = Math.cos(moonAngle) * 1; // 1 is the distance from Earth
+moonMesh.position.z = Math.sin(moonAngle) * 1;
+moonMesh.position.y = Math.sin(moonAngle) * moonTilt; // Add tilt to Y position
+
+           // Update camera position based on slider values
+            camera.position.x = parseFloat(document.getElementById('cameraX').value);
+            camera.position.y = parseFloat(document.getElementById('cameraY').value);
+            camera.position.z = parseFloat(document.getElementById('cameraZ').value);
+
+            // Update camera zoom based on the zoom slider
+            camera.fov = parseFloat(document.getElementById('zoom').value);
+            camera.updateProjectionMatrix(); // Update projection matrix
+
+            // Adjust the view of the entire scene based on POS_X and POS_Y sliders
+            const viewX = parseFloat(document.getElementById('posX').value);
+            const viewY = parseFloat(document.getElementById('posY').value);
+
+            scene.position.set(viewX, viewY, 0); // Move the entire scene along X and Y axes
+
+            // Ensure the camera is always looking at the Sun
+            camera.lookAt(sun.position);
+
+            renderer.render(scene, camera);
+        };
+
+        animate();
+
+        // Initial camera position
+        camera.position.set(0, 30, 30); // Set initial position of the camera
+
+        // Adjust canvas size when the window is resized
+        window.addEventListener('resize', () => {
+            const width = window.innerWidth;
+            const height = window.innerHeight;
+            renderer.setSize(width, height);
+            camera.aspect = width / height;
+            camera.updateProjectionMatrix();
+        });
+
+    </script>
+</body>
+</html>
